@@ -1,61 +1,46 @@
+# app.py
 from flask import Flask, request, send_file, jsonify
 import os
-import uuid
 import subprocess
 
 app = Flask(__name__)
 
-UPLOAD_FOLDER = 'uploads'
-OUTPUT_FOLDER = 'compressed'
-
+UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-@app.route('/')
-def home():
-    return 'PDF Compressor API is working.'
-
-@app.route('/compress', methods=['POST'])
+@app.route("/compress", methods=["POST"])
 def compress_pdf():
     if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
+        return jsonify({"error": "No file uploaded."}), 400
 
-    file = request.files['file']
+    pdf_file = request.files['file']
+    quality = request.form.get('quality', 'screen')
 
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
+    input_path = os.path.join(UPLOAD_FOLDER, "input.pdf")
+    output_path = os.path.join(UPLOAD_FOLDER, "compressed.pdf")
 
-    # Save the uploaded file
-    input_filename = f"{uuid.uuid4()}.pdf"
-    input_path = os.path.join(UPLOAD_FOLDER, input_filename)
-    file.save(input_path)
-
-    # Prepare output path
-    output_filename = f"compressed_{input_filename}"
-    output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+    pdf_file.save(input_path)
 
     try:
-        # Use ghostscript to compress PDF
-        subprocess.run([
-            'gs',
-            '-sDEVICE=pdfwrite',
-            '-dCompatibilityLevel=1.4',
-            '-dPDFSETTINGS=/screen',
-            '-dNOPAUSE',
-            '-dQUIET',
-            '-dBATCH',
-            f'-sOutputFile={output_path}',
-            input_path
-        ], check=True)
+        command = [
+            "gs", "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4",
+            f"-dPDFSETTINGS=/{quality}",
+            "-dNOPAUSE", "-dQUIET", "-dBATCH",
+            f"-sOutputFile={output_path}", input_path
+        ]
+        subprocess.run(command, check=True)
 
-        # Check if file was created and has size
-        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            return jsonify({'error': 'Compression failed'}), 500
+        return send_file(output_path, mimetype='application/pdf', as_attachment=True, download_name='compressed.pdf')
 
-        return send_file(output_path, mimetype='application/pdf', as_attachment=True)
+    except subprocess.CalledProcessError as e:
+        return jsonify({"error": "Compression failed."}), 500
+    finally:
+        if os.path.exists(input_path): os.remove(input_path)
+        if os.path.exists(output_path): os.remove(output_path)
 
-    except subprocess.CalledProcessError:
-        return jsonify({'error': 'Compression process failed'}), 500
+@app.route("/")
+def home():
+    return "PDF Compressor Backend Running"
 
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+if __name__ == "__main__":
+    app.run(debug=True, host='0.0.0.0')
